@@ -3,7 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace WinProcfs
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace Utility
 {
     /// <summary>
     /// File attributes are metadata values stored by the file system on disk and are used by the system and are available to developers via various file I/O APIs.
@@ -87,7 +92,7 @@ namespace WinProcfs
         /// </summary>
         Virtual = 0x00010000
     }
-     class VirtualNode
+    class VirtualNode
     {
         public string NodePath;
         public string[] AllNodes;
@@ -125,10 +130,10 @@ namespace WinProcfs
             }
             else
             {
-                 if (AllNodes.Length==1 && AllNodes[0].EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+                if (AllNodes.Length == 1 && AllNodes[0].EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
                 {
                     CurrentNodeFile = "";
-                    CurrentNodeDir = AllNodes[0].Trim();                    
+                    CurrentNodeDir = AllNodes[0].Trim();
                     RootNode = "\\";
                     CurrentNodeDir = "";
                     isFile = true;
@@ -160,7 +165,7 @@ namespace WinProcfs
 
 
     }
-    
+
     class BaseFileSystem
     {
     }
