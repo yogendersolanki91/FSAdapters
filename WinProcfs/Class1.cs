@@ -6,6 +6,8 @@ using DokanXBase;
 using DokanXNative;
 using Utility;
 using Native.Objects;
+using ST=System.Threading;
+using System.Management;
 
 
 namespace WinProcfs
@@ -23,41 +25,90 @@ namespace WinProcfs
     {
         string[] baseinfos ={ "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IO Counters.inf","Window.inf", "Thread.inf" ,"Handle.inf","Heap.inf","Token.inf","EnvVariable.inf"};
         string[] commonSystem={ "Services.inf", "SystemInfo.inf", "Jobs.inf", "EnvVariable.inf" };
-        
-       public WinProcFS(){
-        
-       }
+        ST.Thread processGrabberThread;
+        ManagementObjectSearcher processSearcher;
+        Dictionary<string, processInfos> database;
+       object critical;
 
-       bool FillProcessDetail(int Pid,ref byte [] output)
+       public WinProcFS(){
+           database=new Dictionary<string,processInfos>();
+           critical=new object();
+           processGrabberThread = new ST.Thread(new ST.ThreadStart(this.UpdateProcessData)) ;
+           processGrabberThread.Name = "DataProcessor";
+           processSearcher = new ManagementObjectSearcher("Select * from Win32_Process");
+           processGrabberThread.Start();
+       }
+       
+       public void UpdateProcessData()
+       {
+           while(true){
+           lock(critical)
+           {
+               string err="";
+               database = Native.Objects.Process.EnumerateHiddenProcessesHandleMethod();
+               if (err != "")
+               {
+                   Console.WriteLine("Grabber Error :"+err);
+               }
+           }
+           ST.Thread.Sleep(3000);
+           }
+       }
+       string NullHandler(object str)
+       {
+           if(str==null)
+           return "";
+
+           return str.ToString();
+
+       }
+       byte[] FillProcessDetail(int Pid)
        {
            StringBuilder builder=new StringBuilder();
-          
+           
           try
           {
-              builder.AppendLine("[ProcessProperty]");
-              cProcess process =Process.GetProcessById(Pid);
-             
-                    
-              foreach (string s in process.GetAvailableProperties(true, true))
+          
+
+              processInfos pfs = new processInfos();
+              if (database.TryGetValue(Pid.ToString(), out pfs))
               {
 
-                if (process.GetType().GetProperty(s).GetValue(process, null) != null)  
-                Console.WriteLine(s + "="+(string)process.GetType().GetProperty(s).GetValue(process, null));
-
-
+                  builder.AppendLine("\n[ProcessProperty]");
+                  builder.AppendLine("AffinityMask=" + NullHandler(pfs.AffinityMask));
+                  builder.AppendLine("Name=" + NullHandler(pfs.Name));
+                  builder.AppendLine("Path=" + NullHandler(pfs.Path));
+                  builder.AppendLine("Priority=" + NullHandler(pfs.Priority));
+                  builder.AppendLine("ProcessId=" + NullHandler(pfs.ProcessId));
+                  builder.AppendLine("ParentProcessId=" + NullHandler(pfs.ParentProcessId));
+                  builder.AppendLine("UserName=" + NullHandler(pfs.UserName));
+                  builder.AppendLine("CommandLineArguments=" + NullHandler(pfs.CommandLine));
+                  builder.AppendLine("DomainName" + NullHandler(pfs.DomainName));
+                  builder.AppendLine("\n[ProcessPerfomanceAndResouces]");
+                  builder.AppendLine("AverageCpuUsage=" + NullHandler(pfs.AverageCpuUsage * 100));
+                  builder.AppendLine("ProcessorTime=" + NullHandler(pfs.ProcessorTime));
+                  builder.AppendLine("UserModeTime" + NullHandler(pfs.UserTime));
+                  builder.AppendLine("KernelTime=" + NullHandler(pfs.KernelTime));
+                  builder.AppendLine("StartTime=" + NullHandler(pfs.StartTime));
+                  builder.AppendLine("\n[SystemResourcesCount]");
+                  builder.AppendLine("ThreadCount=" + NullHandler(pfs.ThreadCount));
+                  builder.AppendLine("UserObjectsCount=" + NullHandler(pfs.UserObjects));
+                  builder.AppendLine("GdiObjects=" + NullHandler(pfs.GdiObjects));
+                  builder.AppendLine("HandleCounts=" + NullHandler(pfs.HandleCount));
+                  builder.AppendLine("[ProcessMisc]");
+                  builder.AppendLine("HasReanalize=" + NullHandler(pfs.HasReanalize));
+                  builder.AppendLine("IsHidden=" + NullHandler(pfs.IsHidden));
+                  Console.WriteLine(builder.ToString());
               }
-
-
-              Console.WriteLine(builder.ToString());
-              return true;
+             
 
               
           }
           catch(Exception e)
           {
-              Console.WriteLine("Info Get:"+e.Message);
-               return false;
+              Console.WriteLine("Info Get:"+e.Message);              
           }
+          return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
         
         
@@ -92,11 +143,12 @@ namespace WinProcfs
            
             return 0;
         }
-        
-        public uint Def_ReadFile(string filename, IntPtr buffer, uint bufferSize, ref uint readBytes, long offset, IntPtr info)
+
+        public uint Def_ReadFile(string filename, IntPtr buffer, uint BufferSize, ref uint NumberByteReadSuccess, long Offset, IntPtr info)
         {
             try
             {
+                byte[] file=null;
                 VirtualNode Node = new VirtualNode(filename);
 
                 if (Node.isFile)
@@ -104,11 +156,27 @@ namespace WinProcfs
                     Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
                     if (Node.CurrentNodeFile.EndsWith(".inf"))
                     {
-                        int pid;
-                        byte[] p = new byte[10];
-                        Console.WriteLine("OK ....");
-                        if (int.TryParse(Node.CurrentNodeDir, out pid))
-                            FillProcessDetail(pid, ref p);
+                        if (Node.CurrentNodeFile == "Process.inf")
+                        {
+                            int pid;
+                            byte[] p = new byte[10];
+                            Console.WriteLine("OK ....");
+                            if (int.TryParse(Node.CurrentNodeDir, out pid))
+                               file =FillProcessDetail(pid);
+
+                            if(file!=null)
+                            if (BufferSize > file.Length - Offset)
+                            {
+                                NumberByteReadSuccess = (uint)(file.Length - Offset);
+                                System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)NumberByteReadSuccess);
+                            }
+                            else
+                            {
+                                NumberByteReadSuccess = BufferSize;
+                                System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)BufferSize);
+                            }
+
+                        }
                     }
 
                 }
@@ -136,6 +204,7 @@ namespace WinProcfs
             Information.CreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
             Information.LastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
             Information.LastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+            Information.FileSizeLow = 2000;
             if (Node.isFile)
                 Information.FileAttributes = FileAttributes.Readonly;
             else
@@ -168,16 +237,18 @@ namespace WinProcfs
                 VirtualNode Node = new VirtualNode(filename);
                 if ((Node.RootNode == "\\" || Node.RootNode == "") && !Node.isFile && Node.CurrentNodeDir=="")
                 {
-                    Dictionary<string, processInfos> processes = Process.EnumerateVisibleProcesses(true);
-                    foreach (string prcs in processes.Keys)
+                    lock (critical)
                     {
-                        WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
-                        Information.cFileName = prcs;
-                        Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
-                        Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
-                        Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
-                        Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;
-                        FillFunction(ref Information, info);
+                        foreach (string prcs in database.Keys)
+                        {
+                            WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
+                            Information.cFileName = prcs;
+                            Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;
+                            FillFunction(ref Information, info);
+                        }
                     }
                     foreach (string file in commonSystem)
                     {
@@ -187,6 +258,7 @@ namespace WinProcfs
                         Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                         Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                         Information.dwFileAttributes = FileAttributes.Readonly;
+                        Information.nFileSizeLow = 2000;
                         FillFunction(ref Information, info);
                     }
 
@@ -204,7 +276,7 @@ namespace WinProcfs
                             Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                             Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                             Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
-                            Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;
+                            Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;                            
                             FillFunction(ref Information, info);
                         }
                         foreach (string file in baseinfos)
@@ -214,6 +286,7 @@ namespace WinProcfs
                             Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                             Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
                             Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.nFileSizeLow = 2000;
                             Information.dwFileAttributes = FileAttributes.Readonly;
                             FillFunction(ref Information, info);
                         }

@@ -58,13 +58,15 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Management" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
-    <Reference Include="YAPM">
-      <HintPath>D:\YAPM-v2.4.1-source\Test\bin\Debug\YAPM.dll</HintPath>
+    <Reference Include="YAPM, Version=2.4.1.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>D:\YAPM-v2.4.1-source\YAPM\bin\release\YAPM.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
