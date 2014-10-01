@@ -6,7 +6,7 @@ using DokanXBase;
 using DokanXNative;
 using Utility;
 using Native.Objects;
-using NLog;
+
 
 namespace WinProcfs
 {
@@ -36,10 +36,14 @@ namespace WinProcfs
           {
               builder.AppendLine("[ProcessProperty]");
               cProcess process =Process.GetProcessById(Pid);
-
+             
+                    
               foreach (string s in process.GetAvailableProperties(true, true))
               {
-                  builder.AppendLine(s + "=");
+
+                if (process.GetType().GetProperty(s).GetValue(process, null) != null)  
+                Console.WriteLine(s + "="+(string)process.GetType().GetProperty(s).GetValue(process, null));
+
 
               }
 
@@ -50,7 +54,8 @@ namespace WinProcfs
               
           }
           catch(Exception e)
-          {       
+          {
+              Console.WriteLine("Info Get:"+e.Message);
                return false;
           }
        } 
@@ -90,20 +95,30 @@ namespace WinProcfs
         
         public uint Def_ReadFile(string filename, IntPtr buffer, uint bufferSize, ref uint readBytes, long offset, IntPtr info)
         {
-            VirtualNode Node = new VirtualNode(filename);
-            if (Node.isFile)
+            try
             {
+                VirtualNode Node = new VirtualNode(filename);
 
-                if (Node.CurrentNodeFile.Contains("Processs") && Node.CurrentNodeFile.EndsWith(".inf"))
+                if (Node.isFile)
                 {
-                    int pid;
-                    byte []p=new byte[10];
-                    if (int.TryParse(Node.CurrentNodeDir, out pid))
-                        FillProcessDetail(pid,ref p);
-                }
+                    Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
+                    if (Node.CurrentNodeFile.EndsWith(".inf"))
+                    {
+                        int pid;
+                        byte[] p = new byte[10];
+                        Console.WriteLine("OK ....");
+                        if (int.TryParse(Node.CurrentNodeDir, out pid))
+                            FillProcessDetail(pid, ref p);
+                    }
 
+                }
+                return 0;
             }
-            return 0;
+            catch(Exception e)
+            {
+                Console.WriteLine("Read -"+e.Message+" Line "+new System.Diagnostics.StackTrace(e,true).GetFrame(0).GetFileLineNumber());
+                return NtStatus.FileInvalid;
+            }
         }
 
 
