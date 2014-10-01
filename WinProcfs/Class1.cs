@@ -73,8 +73,8 @@ namespace WinProcfs
               processInfos pfs = new processInfos();
               if (database.TryGetValue(Pid.ToString(), out pfs))
               {
-
-                  builder.AppendLine("\n[ProcessProperty]");
+                  
+                  builder.AppendLine("[Process Property]");
                   builder.AppendLine("AffinityMask=" + NullHandler(pfs.AffinityMask));
                   builder.AppendLine("Name=" + NullHandler(pfs.Name));
                   builder.AppendLine("Path=" + NullHandler(pfs.Path));
@@ -84,17 +84,23 @@ namespace WinProcfs
                   builder.AppendLine("UserName=" + NullHandler(pfs.UserName));
                   builder.AppendLine("CommandLineArguments=" + NullHandler(pfs.CommandLine));
                   builder.AppendLine("DomainName" + NullHandler(pfs.DomainName));
-                  builder.AppendLine("\n[ProcessPerfomanceAndResouces]");
+
+                  builder.AppendLine("");
+                  builder.AppendLine("[Perfomance and Resouces]");
                   builder.AppendLine("AverageCpuUsage=" + NullHandler(pfs.AverageCpuUsage * 100));
                   builder.AppendLine("ProcessorTime=" + NullHandler(pfs.ProcessorTime));
                   builder.AppendLine("UserModeTime" + NullHandler(pfs.UserTime));
                   builder.AppendLine("KernelTime=" + NullHandler(pfs.KernelTime));
                   builder.AppendLine("StartTime=" + NullHandler(pfs.StartTime));
-                  builder.AppendLine("\n[SystemResourcesCount]");
+
+                  builder.AppendLine("");
+                  builder.AppendLine("\n[System Resources Count]");
                   builder.AppendLine("ThreadCount=" + NullHandler(pfs.ThreadCount));
                   builder.AppendLine("UserObjectsCount=" + NullHandler(pfs.UserObjects));
                   builder.AppendLine("GdiObjects=" + NullHandler(pfs.GdiObjects));
                   builder.AppendLine("HandleCounts=" + NullHandler(pfs.HandleCount));
+                  
+                  builder.AppendLine("");
                   builder.AppendLine("[ProcessMisc]");
                   builder.AppendLine("HasReanalize=" + NullHandler(pfs.HasReanalize));
                   builder.AppendLine("IsHidden=" + NullHandler(pfs.IsHidden));
@@ -110,8 +116,7 @@ namespace WinProcfs
           }
           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
-        
-        
+                
         public uint Def_Cleanup(string filename, IntPtr info)
         {
             return 0;
