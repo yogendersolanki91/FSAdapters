@@ -104,57 +104,67 @@ namespace Utility
             AllNodes = Path.Split('\\').Where(x => !string.IsNullOrEmpty(x)).ToArray();
 
             NodePath = Path;
-            if (AllNodes.Length >= 2 && !Path.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+            if (!Path.EndsWith("Desktop.inf", StringComparison.InvariantCultureIgnoreCase) && !Path.EndsWith("Autorun.inf", StringComparison.InvariantCultureIgnoreCase))
             {
-                //for (int i = 1; i < AllNodes.Length - 2;i++ )
-                CurrentNodeDir = AllNodes[AllNodes.Length - 1].Trim();
-                CurrentNodeFile = "";
-                isFile = false;
-                RootNode = AllNodes[0];
-
-            }
-
-            else if (AllNodes.Length >= 2 && NodePath.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
-            {
-                CurrentNodeDir = AllNodes[AllNodes.Length - 2].Trim();
-                CurrentNodeFile = AllNodes[AllNodes.Length - 1].Trim();
-                isFile = true;
-                RootNode = AllNodes[0].Trim();
-                if (RootNode.Contains(".inf"))
-                    RootNode = @"\";
-
-
-
-                //      isFile = true;
-            }
-            else
-            {
-                if (AllNodes.Length == 1 && AllNodes[0].EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+                if (AllNodes.Length >= 2 && !Path.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
                 {
+                    //for (int i = 1; i < AllNodes.Length - 2;i++ )
+                    CurrentNodeDir = AllNodes[AllNodes.Length - 1].Trim();
                     CurrentNodeFile = "";
-                    CurrentNodeDir = AllNodes[0].Trim();
-                    RootNode = "\\";
-                    CurrentNodeDir = "";
-                    isFile = true;
-                    RootNode = "\\";
-                }
-                else if (AllNodes.Length == 1)
-                {
-                    CurrentNodeFile = "";
-                    CurrentNodeDir = AllNodes[0].Trim();
                     isFile = false;
-                    RootNode = "\\";
+                    RootNode = AllNodes[0];
+
+                }
+
+                else if (AllNodes.Length >= 2 && NodePath.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    CurrentNodeDir = AllNodes[AllNodes.Length - 2].Trim();
+                    CurrentNodeFile = AllNodes[AllNodes.Length - 1].Trim();
+                    isFile = true;
+                    RootNode = AllNodes[0].Trim();
+                    if (RootNode.Contains(".inf"))
+                        RootNode = @"\";
+
+
+
+                    //      isFile = true;
                 }
                 else
                 {
-                    CurrentNodeFile = "";
-                    CurrentNodeDir = "";
-                    isFile = false;
-                    RootNode = "\\";
+                    if (AllNodes.Length == 1 && AllNodes[0].EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+                    {
+
+                        CurrentNodeFile = AllNodes[0].Trim();
+                        RootNode = "\\";
+                        CurrentNodeDir = "";
+                        isFile = true;
+                        //RootNode = "\\";
+                    }
+                    else if (AllNodes.Length == 1)
+                    {
+                        CurrentNodeFile = "";
+                        CurrentNodeDir = AllNodes[0].Trim();
+                        isFile = false;
+                        RootNode = "\\";
+                    }
+                    else
+                    {
+                        CurrentNodeFile = "";
+                        CurrentNodeDir = "";
+                        isFile = false;
+                        RootNode = "\\";
+                    }
+                    //isFile = true;
+
+
                 }
-                //isFile = true;
-
-
+            }
+            else {
+                CurrentNodeFile = "";
+                CurrentNodeDir = "";
+                isFile = false;
+                RootNode = "\\";
+            
             }
 
 

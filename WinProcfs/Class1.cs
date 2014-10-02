@@ -24,7 +24,7 @@ namespace WinProcfs
     class WinProcFS : FileSystemCoreFunctions
     {
         string[] baseinfos ={ "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IO Counters.inf","Window.inf", "Thread.inf" ,"Handle.inf","Heap.inf","Token.inf","EnvVariable.inf"};
-        string[] commonSystem={ "Services.inf", "SystemInfo.inf", "Jobs.inf", "EnvVariable.inf" };
+        string[] commonSystem={ "Services.inf", "SystemInfo.inf", "Jobs.inf", "EnvVariable.inf","NetStat.inf"};
         ST.Thread processGrabberThread;
         ManagementObjectSearcher processSearcher;
         Dictionary<string, processInfos> database;
@@ -160,6 +160,51 @@ namespace WinProcfs
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        }
 
+       byte[] FillNetworkStatDetail()
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {               
+               Native.Api.NativeStructs.MibTcpStats tcpState= Native.Objects.Network.GetTcpStatistics();
+               Native.Api.NativeStructs.MibUdpStats udp = Native.Objects.Network.GetUdpStatistics();
+
+              
+               builder.AppendLine("[TCPStats]");
+               builder.AppendLine("ActiveOpens=" + NullHandler(tcpState.ActiveOpens));
+               builder.AppendLine("AttemptFails=" + NullHandler(tcpState.AttemptFails));
+               builder.AppendLine("CurrEstab=" + NullHandler(tcpState.CurrEstab));
+               builder.AppendLine("EstabResets=" + NullHandler(tcpState.EstabResets));
+               builder.AppendLine("InErrs=" + NullHandler(tcpState.InErrs));
+               builder.AppendLine("InSegs=" + NullHandler(tcpState.InSegs));
+               builder.AppendLine("MaxConn=" + NullHandler(tcpState.MaxConn));
+               builder.AppendLine("NumConns=" + NullHandler(tcpState.NumConns));
+               builder.AppendLine("OutRsts=" + NullHandler(tcpState.OutRsts));
+               builder.AppendLine("PassiveOpens=" + NullHandler(tcpState.PassiveOpens));
+               builder.AppendLine("RetransSegs=" + NullHandler(tcpState.RetransSegs));
+               builder.AppendLine("RtoAlgorithm=" + NullHandler(tcpState.RtoAlgorithm));
+               builder.AppendLine("RtoMax=" + NullHandler(tcpState.RtoMax));
+               builder.AppendLine("RtoMin=" + NullHandler(tcpState.RtoMin));
+               
+               builder.AppendLine("");
+
+               builder.AppendLine("[UDPStats]");
+               builder.AppendLine("InDatagrams=" + NullHandler(udp.InDatagrams));
+               builder.AppendLine("InErrors=" + NullHandler(udp.InErrors));
+               builder.AppendLine("NoPorts=" + NullHandler(udp.NoPorts));
+               builder.AppendLine("NumAddrs=" + NullHandler(udp.NumAddrs));
+               builder.AppendLine("OutDatagrams=" + NullHandler(udp.OutDatagrams));              
+
+               Console.WriteLine(builder.ToString());
+
+           }
+           catch (Exception e)
+           {
+               Console.WriteLine("Info Get:" + e.Message);
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       } 
+
        byte[] FillNetworkkDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
@@ -167,31 +212,32 @@ namespace WinProcfs
            try
            {
               Dictionary<string,networkInfos> SocketInfo=new Dictionary<string,networkInfos>();
-              Native.Objects.Network.EnumerateTcpUdpConnections(ref SocketInfo,false,Pid);
-               processInfos pfs = new processInfos();
+              Native.Objects.Network.EnumerateTcpUdpConnections(ref SocketInfo,true,Pid);
+               processInfos pfs = new processInfos();              
                if(SocketInfo.Values.Count>=1)
                {
                    builder.AppendLine("[Network Connection]");
                    foreach (networkInfos info in SocketInfo.Values)
                    {
-                      
-                       
-                        builder.Append("Protocol="+info.Protocol);
-                        builder.Append("State="+info.State);
-                        builder.Append("LocalAddress=" + info.Local.Address.ToString() + ":" + info.Local.Port.ToString());
-                        builder.Append("LocalString="+info.LocalString);                        
-                        builder.Append("Remote="+info.Remote.Address.ToString()+":"+info.Remote.Port.ToString());                                         
-                        builder.Append("RemoteString="+info.RemoteString);
-                        builder.Append("Key=" + info.Key);
-                        builder.AppendLine("");                       
+
+                       if (info.ProcessId == Pid)
+                       {
+                           builder.AppendLine("Protocol=" + NullHandler(info.Protocol));
+                           builder.AppendLine("State=" + NullHandler(info.State));
+                           builder.AppendLine("LocalAddress=" + NullHandler(info.Local));
+                           
+                           builder.AppendLine("RemoteAdress=" + NullHandler(info.Remote));
+                                                      
+                           builder.AppendLine("");
+                       }
                            
                        
                    }
 
-                   Console.WriteLine(builder.ToString());
+                  
                }
 
-
+               Console.WriteLine(builder.ToString());
 
            }
            catch (Exception e)
@@ -239,17 +285,19 @@ namespace WinProcfs
             {
                 byte[] file=null;
                 VirtualNode Node = new VirtualNode(filename);
-
+                Console.WriteLine("{0},{1},{2}", Node.CurrentNodeDir, Node.CurrentNodeFile,Node.isFile); 
                 if (Node.isFile)
                 {
                     Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
                     if (Node.CurrentNodeFile.EndsWith(".inf"))
                     {
-
+                       
                         int pid;
                         Console.WriteLine("OK ....");
                         if (int.TryParse(Node.CurrentNodeDir, out pid))
                         {
+
+                            Console.WriteLine("ID case "+pid);
                             switch (Node.CurrentNodeFile) { 
                                 case "Process.inf":
                                 file = FillProcessDetail(pid);
@@ -264,7 +312,25 @@ namespace WinProcfs
                                     break;
                             }
                         }
-                            if(file!=null && file.Length!=0)
+                        else
+                        {
+                            Console.WriteLine("ID " + pid);
+                            if(Node.CurrentNodeDir=="\\" || Node.CurrentNodeDir==""){
+                               
+                           switch (Node.CurrentNodeFile) 
+                            {
+                                case "NetStat.inf":
+                                file = FillNetworkStatDetail();
+                                break;
+                                default:
+                                break;
+                            }
+                            }
+
+
+                        }
+                        if (file != null && file.Length != 0 && Offset < file.Length)
+                        {
                             if (BufferSize > file.Length - Offset)
                             {
                                 NumberByteReadSuccess = (uint)(file.Length - Offset);
@@ -275,6 +341,10 @@ namespace WinProcfs
                                 NumberByteReadSuccess = BufferSize;
                                 System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)BufferSize);
                             }
+                        }
+                        else {
+                            NumberByteReadSuccess = 0;
+                        }
 
                         
                     }
