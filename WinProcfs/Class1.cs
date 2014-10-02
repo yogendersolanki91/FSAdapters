@@ -115,8 +115,92 @@ namespace WinProcfs
               Console.WriteLine("Info Get:"+e.Message);              
           }
           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillMemorykDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+              
+               processInfos pfs = new processInfos();
+               if (database.TryGetValue(Pid.ToString(), out pfs))
+               {
+
+                   builder.AppendLine("[Memory Count]");
+                   builder.AppendLine("PageFaultCount=" + NullHandler(pfs.MemoryInfos.PageFaultCount));
+                   builder.AppendLine("PagefileUsage=" + NullHandler(pfs.MemoryInfos.PagefileUsage));
+                   builder.AppendLine("PeakPagefileUsage=" + NullHandler(pfs.MemoryInfos.PeakPagefileUsage));
+                   builder.AppendLine("PeakVirtualSize=" + NullHandler(pfs.MemoryInfos.PeakVirtualSize));
+                   builder.AppendLine("PeakWorkingSetSize=" + NullHandler(pfs.MemoryInfos.PeakWorkingSetSize));
+                   builder.AppendLine("PrivateBytes=" + NullHandler(pfs.MemoryInfos.PrivateBytes));
+                   builder.AppendLine("VirtualSize=" + NullHandler(pfs.MemoryInfos.VirtualSize));
+                   builder.AppendLine("WorkingSetSize=" + NullHandler(pfs.MemoryInfos.WorkingSetSize));
+                   
+
+                   builder.AppendLine("");
+                   builder.AppendLine("[Quota Details]");
+                   builder.AppendLine("QuotaPeakPagedPoolUsage=" + NullHandler(pfs.MemoryInfos.QuotaPeakPagedPoolUsage));
+                   builder.AppendLine("QuotaNonPagedPoolUsage=" + NullHandler(pfs.MemoryInfos.QuotaNonPagedPoolUsage));
+                   builder.AppendLine("QuotaPagedPoolUsage=" + NullHandler(pfs.MemoryInfos.QuotaPagedPoolUsage));
+                   builder.AppendLine("QuotaPeakNonPagedPoolUsage" + NullHandler(pfs.MemoryInfos.QuotaPeakNonPagedPoolUsage));
+                   
+      
+                   Console.WriteLine(builder.ToString());
+               }
+
+  
+
+           }
+           catch (Exception e)
+           {
+               Console.WriteLine("Info Get:" + e.Message);
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillNetworkkDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+              Dictionary<string,networkInfos> SocketInfo=new Dictionary<string,networkInfos>();
+              Native.Objects.Network.EnumerateTcpUdpConnections(ref SocketInfo,false,Pid);
+               processInfos pfs = new processInfos();
+               if(SocketInfo.Values.Count>=1)
+               {
+                   builder.AppendLine("[Network Connection]");
+                   foreach (networkInfos info in SocketInfo.Values)
+                   {
+                      
+                       
+                        builder.Append("Protocol="+info.Protocol);
+                        builder.Append("State="+info.State);
+                        builder.Append("LocalAddress=" + info.Local.Address.ToString() + ":" + info.Local.Port.ToString());
+                        builder.Append("LocalString="+info.LocalString);                        
+                        builder.Append("Remote="+info.Remote.Address.ToString()+":"+info.Remote.Port.ToString());                                         
+                        builder.Append("RemoteString="+info.RemoteString);
+                        builder.Append("Key=" + info.Key);
+                        builder.AppendLine("");                       
+                           
+                       
+                   }
+
+                   Console.WriteLine(builder.ToString());
+               }
+
+
+
+           }
+           catch (Exception e)
+           {
+               Console.WriteLine("Info Get:" + e.Message);
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
-                
+ 
         public uint Def_Cleanup(string filename, IntPtr info)
         {
             return 0;
@@ -161,15 +245,26 @@ namespace WinProcfs
                     Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
                     if (Node.CurrentNodeFile.EndsWith(".inf"))
                     {
-                        if (Node.CurrentNodeFile == "Process.inf")
-                        {
-                            int pid;
-                            byte[] p = new byte[10];
-                            Console.WriteLine("OK ....");
-                            if (int.TryParse(Node.CurrentNodeDir, out pid))
-                               file =FillProcessDetail(pid);
 
-                            if(file!=null)
+                        int pid;
+                        Console.WriteLine("OK ....");
+                        if (int.TryParse(Node.CurrentNodeDir, out pid))
+                        {
+                            switch (Node.CurrentNodeFile) { 
+                                case "Process.inf":
+                                file = FillProcessDetail(pid);
+                                    break;
+                                case "Memory.inf":
+                                    file = FillMemorykDetail(pid);
+                                    break;
+                                case "Network.inf":
+                                    file = FillNetworkkDetail(pid);
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                            if(file!=null && file.Length!=0)
                             if (BufferSize > file.Length - Offset)
                             {
                                 NumberByteReadSuccess = (uint)(file.Length - Offset);
@@ -181,7 +276,7 @@ namespace WinProcfs
                                 System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)BufferSize);
                             }
 
-                        }
+                        
                     }
 
                 }
@@ -194,7 +289,7 @@ namespace WinProcfs
             }
         }
 
-
+    
         public uint Def_GetDiskInfo(ref ulong Available, ref ulong Total, ref ulong Free)
         {
             Available = 95245862458;
@@ -221,7 +316,9 @@ namespace WinProcfs
         public uint Def_GetVolumeInfo(IntPtr VolumeNameBuffer, uint VolumeNameSize, ref uint SerialNumber, ref uint MaxComponenetLegnth, ref uint FileSystemFeatures, IntPtr FileSystemNameBuffer, uint FileSystemNameSize)
         {
             HelperFunction.SetVolumeInfo(VolumeNameBuffer, "Process Data", (int)VolumeNameSize, FileSystemNameBuffer, "ProcFS", (int)FileSystemNameSize);
-
+            SerialNumber = (uint)GetHashCode();
+            MaxComponenetLegnth = 256;
+           
             return 0;
         }
 
