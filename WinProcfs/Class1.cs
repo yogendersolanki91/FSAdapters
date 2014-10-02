@@ -8,6 +8,9 @@ using Utility;
 using Native.Objects;
 using ST=System.Threading;
 using System.Management;
+using System.Runtime.InteropServices;
+using SD=System.Diagnostics;
+using System.Globalization;
 
 
 namespace WinProcfs
@@ -23,7 +26,7 @@ namespace WinProcfs
 
     class WinProcFS : FileSystemCoreFunctions
     {
-        string[] baseinfos ={ "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IO Counters.inf","Window.inf", "Thread.inf" ,"Handle.inf","Heap.inf","Token.inf","EnvVariable.inf"};
+        string[] baseinfos = { "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IO Counters.inf", "Window.inf", "Thread.inf", "Handle.inf", "Heap.inf", "Token.inf", "EnvVariable.inf" };
         string[] commonSystem={ "Services.inf", "SystemInfo.inf", "Jobs.inf", "EnvVariable.inf","NetStat.inf"};
         ST.Thread processGrabberThread;
         ManagementObjectSearcher processSearcher;
@@ -64,49 +67,535 @@ namespace WinProcfs
            return str.ToString();
 
        }
-       byte[] FillModuleDetail(int Pid)
+
+           private static bool IsWin64(int pid)
+        {
+               try{
+            System.Diagnostics.Process process=  System.Diagnostics.Process.GetProcessById(pid);
+            if ((Environment.OSVersion.Version.Major > 5)
+                || ((Environment.OSVersion.Version.Major == 5) && (Environment.OSVersion.Version.Minor >= 1)))
+            {
+                        try
+                        {
+                            bool retVal;
+
+                            return NativeMethods.IsWow64Process(process.Handle, out retVal) && retVal;
+                        }
+                        catch
+                        {
+                            return false; // access is denied to the process
+                        }
+                    }
+
+                        return false; // not on 64-bit Windows
+             }
+               catch (Exception e)
+               {
+                   return false;
+               }
+
+        
+
+    }
+
+       internal static class NativeMethods
+    {
+        [DllImport("kernel32.dll", SetLastError = true, CallingConvention = CallingConvention.Winapi)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool IsWow64Process([In] IntPtr process, [Out] out bool wow64Process);
+    }
+
+       private bool ProcessExists(int id)
+        {
+            return SD.Process.GetProcesses().Any(x => x.Id == id);
+        }
+
+       byte[] FillJobDetail()
+       {
+           StringBuilder builder = new StringBuilder();
+           try
+           {
+                     Dictionary<string, jobInfos> info = Job.EnumerateJobs(); ;
+                 
+                   foreach (jobInfos minf in info.Values)
+                   {
+                       builder.AppendLine("[Job " + minf.Name + "]");
+                       builder.AppendLine("ActiveProcess= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.ActiveProcesses));
+                       builder.AppendLine("TotalKernelTime= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.ThisPeriodTotalKernelTime));
+                       builder.AppendLine("TotalUserTime= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.ThisPeriodTotalUserTime));
+                       builder.AppendLine("KernelTime= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.TotalKernelTime));
+                       builder.AppendLine("TotalPageFaultCount= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.TotalPageFaultCount));
+                       builder.AppendLine("TotalProcess= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.TotalProcesses));
+                       builder.AppendLine("TotalTeminatedProcess= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.TotalTerminatedProcesses));
+                       builder.AppendLine("TotalUserTime= " + NullHandler(minf.BasicAndIoAccountingInformation.BasicInfo.TotalUserTime));
+                       builder.AppendLine("ActiveProcessLimit=" + NullHandler(minf.BasicLimitInformation.ActiveProcessLimit));
+                       builder.AppendLine("Affinity=" + NullHandler(minf.BasicLimitInformation.Affinity));
+                       builder.AppendLine("LimitFlags=" + NullHandler(minf.BasicLimitInformation.LimitFlags));
+                       builder.AppendLine("MaximumWorkingSetSize=" + NullHandler(minf.BasicLimitInformation.MaximumWorkingSetSize));
+                       builder.AppendLine("MinimumWorkingSetSize=" + NullHandler(minf.BasicLimitInformation.MinimumWorkingSetSize));
+                       builder.AppendLine("PerJobUserTimeLimit=" + NullHandler(minf.BasicLimitInformation.PerJobUserTimeLimit));
+                       builder.AppendLine("PerProcessTimeLimit=" + NullHandler(minf.BasicLimitInformation.PerProcessUserTimeLimit));
+                       builder.AppendLine("PriorityClass=" + NullHandler(minf.BasicLimitInformation.PriorityClass));
+                       builder.AppendLine("SchedulingClass=" + NullHandler(minf.BasicLimitInformation.SchedulingClass));
+                       builder.AppendLine("Name=" + NullHandler(minf.Name));
+                       builder.AppendLine("PidList=" + NullHandler(minf.PidList.Select(i => i.ToString(CultureInfo.InvariantCulture)).Aggregate((s1, s2) => s1 + ", " + s2)));                       
+                        builder.AppendLine("");
+                   }
+
+                   Console.WriteLine(builder.ToString());
+               
+
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+
+       } 
+
+       byte[] FillSysDetail()
        {
            StringBuilder builder = new StringBuilder();
 
            try
            {
 
-               Console.WriteLine("fOR pROCESS " + Pid) ;
-               Dictionary<string, moduleInfos> module=new Dictionary<string,moduleInfos>();
-               cProcess process = cProcess.GetProcessById(Pid);
-               if(process.IsWow64Process)
-               module = Module.EnumerateModulesWow64ByProcessId(Pid, false);
-               else
-                   module = Module.EnumerateModulesByProcessId(Pid, false);
-               if (module.Values.Count>=1)
+
+               Native.Api.NativeStructs.SystemInfo info = SystemInfo.GetSystemInfo();
+               
+                       builder.AppendLine("[System:" + Environment.MachineName + "]");
+
+                       builder.AppendLine("ActiveProcessorMask:" + NullHandler(info.dwActiveProcessorMask));
+                       builder.AppendLine("AllocationGranularity:" + NullHandler(info.dwAllocationGranularity));
+                       builder.AppendLine("PageSize:" + NullHandler(info.dwPageSize));
+                       builder.AppendLine("NumberOfProcessors:" + NullHandler(info.dwNumberOfProcessors));
+                       builder.AppendLine("ProcessorLevel:" + NullHandler(info.dwProcessorLevel));
+                       builder.AppendLine("ProcessorRevision:" + NullHandler(info.dwProcessorRevision));
+                       builder.AppendLine("ProcessorType:" + NullHandler(info.dwProcessorType));
+                       builder.AppendLine("MaximumApplicationAddress:" + NullHandler(info.lpMaximumApplicationAddress));
+                       builder.AppendLine("MinimumApplicationAddress" + NullHandler(info.lpMinimumApplicationAddress));
+                       Console.WriteLine(builder.ToString());
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+            
+       byte[] FillServiceDetail()
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+               
+               processInfos pfs = new processInfos();
+           
+
+                   Dictionary<string, serviceInfos> srv = new Dictionary<string, serviceInfos>();
+                   Service.EnumerateServices(Service.GetSCManagerHandle(Native.Security.ServiceManagerAccess.EnumerateService), ref srv, true, true);
+                   foreach (serviceInfos minf in srv.Values)
+                   {
+                       builder.AppendLine("[MemoryRegion:" + minf.DisplayName + "]");
+                       builder.AppendLine("AcceptedControl=" + NullHandler(minf.AcceptedControl));
+                       builder.AppendLine("CheckPoint=" + NullHandler(minf.CheckPoint));
+                       builder.AppendLine("Dependencies=" + NullHandler(minf.Dependencies));
+                       builder.AppendLine("Desription=" + NullHandler(minf.Description));
+                       builder.AppendLine("DigonosticMessageFile=" + NullHandler(minf.DiagnosticMessageFile));
+                       builder.AppendLine("ErrorControl=" + NullHandler(minf.ErrorControl));                       
+                       builder.AppendLine("ImagePath=" + NullHandler(minf.ImagePath));
+                       builder.AppendLine("LoadOrderGroup=" + NullHandler(minf.LoadOrderGroup));
+                       builder.AppendLine("Name=" + NullHandler(minf.Name));
+                       builder.AppendLine("ObjectName=" + NullHandler(minf.ObjectName));
+                       builder.AppendLine("ProcessId=" + NullHandler(minf.ProcessId));
+                       builder.AppendLine("ProcessName=" + NullHandler(minf.ProcessName));
+                       builder.AppendLine("ServiceFlag=" + NullHandler(minf.ServiceFlags));
+                       builder.AppendLine("ServiceSpecificExitCode=" + NullHandler(minf.ServiceSpecificExitCode));
+                       builder.AppendLine("ServiceStartName=" + NullHandler(minf.ServiceStartName));
+                       builder.AppendLine("ServiceType=" + NullHandler(minf.ServiceType));
+                       builder.AppendLine("StartType=" + NullHandler(minf.StartType));
+                       builder.AppendLine("State=" + NullHandler(minf.State));
+                       builder.AppendLine("Tag=" + NullHandler(minf.Tag));
+                       builder.AppendLine("TagID=" + NullHandler(minf.TagID));
+                       builder.AppendLine("WaitHint=" + NullHandler(minf.WaitHint));
+                       builder.AppendLine("Win32ExitCode=" + NullHandler(minf.Win32ExitCode));
+                       builder.AppendLine(NullHandler(minf.FileInfo));
+                       builder.AppendLine("");
+
+                       
+                   
+
+                   Console.WriteLine(builder.ToString());
+               }
+
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillMemRegionDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               if (database.TryGetValue(Pid.ToString(), out pfs))
                {
-                   foreach(moduleInfos mod in module.Values){
-                    builder.AppendLine("[" +NullHandler(mod.Name)+ "]");
-                    builder.AppendLine("BaseAddres"+NullHandler(mod.BaseAddress));
-                    builder.AppendLine("EntryPoint" + NullHandler(mod.EntryPoint));
-                    builder.AppendLine("Flags" + NullHandler(mod.Flags));
-                    builder.AppendLine("LoadCount" + NullHandler(mod.LoadCount));
-                    builder.AppendLine("Manufacturer" + NullHandler(mod.Manufacturer));
-                    builder.AppendLine("Path" + NullHandler(mod.Path));
-                    builder.AppendLine("Version" + NullHandler(mod.Version));
-                    builder.AppendLine("Path" + NullHandler(mod.Path));
+
+                   
+                   Dictionary<string,memRegionInfos> info=new Dictionary<string,memRegionInfos>();
+                   MemRegion.EnumerateMemoryRegionsByProcessId(Pid, ref info);
+                   foreach (memRegionInfos minf in info.Values)
+                   {
+                       builder.AppendLine("[MemoryRegion "+minf.Name+"]");
+                       builder.AppendLine("BaseAddress=" + NullHandler(minf.BaseAddress));
+                       builder.AppendLine("Protection=" + NullHandler(minf.Protection));
+                       builder.AppendLine("RegionSize="+NullHandler(minf.RegionSize));
+                       builder.AppendLine("State=" + NullHandler(minf.State));
+                       builder.AppendLine("Type=" + NullHandler(minf.Type));
+                       builder.AppendLine("");
+                   }
+           
+                   Console.WriteLine(builder.ToString());
+               }
+
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillIODetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               
+               if (database.TryGetValue(Pid.ToString(), out pfs))
+               {
+
+                   
+                  
+                       builder.AppendLine("[IOCounter]");
+                       builder.AppendLine("WriteOperationCount=" + NullHandler(pfs.IOValues.WriteOperationCount));
+                       builder.AppendLine("WriteTransferCount=" + NullHandler(pfs.IOValues.WriteTransferCount));
+                       builder.AppendLine("ReadOperationCount=" + NullHandler(pfs.IOValues.ReadOperationCount));
+                       builder.AppendLine("ReadTransferCount=" + NullHandler(pfs.IOValues.ReadTransferCount));
+                       builder.AppendLine("OtherOperationCount=" + NullHandler(pfs.IOValues.OtherOperationCount));
+                       builder.AppendLine("OtherTransferCount=" + NullHandler(pfs.IOValues.OtherTransferCount));
+                       builder.AppendLine("");
+               
+
+                   Console.WriteLine(builder.ToString());
+               }
+
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillWindowDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               Dictionary<string, windowInfos> win = new Dictionary<string, windowInfos>();
+               Window.EnumerateWindowsByProcessId(Pid,false,true,ref win,true);
+
+               foreach(windowInfos info in win.Values)
+               {
+                   builder.AppendLine("[Windows ]");
+                   builder.AppendLine("Enabled=" + NullHandler(info.Enabled));
+                   builder.AppendLine("Handle=" + NullHandler(info.Handle));
+                   builder.AppendLine("Height=" + NullHandler(info.Height));
+                   builder.AppendLine("Width=" + NullHandler(info.Width));
+                   builder.AppendLine("IsTask=" + NullHandler(info.IsTask));
+                   builder.AppendLine("Top=" + NullHandler(info.Top));
+                   builder.AppendLine("Left=" + NullHandler(info.Left));
+                   builder.AppendLine("Opacity=" + NullHandler(info.Opacity));
+                   builder.AppendLine("ThreadId=" + NullHandler(info.ThreadId));
+                   builder.AppendLine("Visible=" + NullHandler(info.Visible));
+                   builder.AppendLine("");
+                   
+               }
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+       byte[] FillThreadDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               Dictionary<string, threadInfos> thr = new Dictionary<string, threadInfos>();
+               Thread.EnumerateThreadsByProcessId(ref thr, Pid);
+
+               foreach (threadInfos info in thr.Values)
+               {
+                   builder.AppendLine("[Thread "+info.Id+" ]");
+                   builder.AppendLine("KernelTime=" + NullHandler(info.KernelTime));
+                   builder.AppendLine("Priority=" + NullHandler(info.Priority));
+                   builder.AppendLine("ProcessID=" + NullHandler(info.ProcessId));
+                   builder.AppendLine("StartAddress=" + NullHandler(info.StartAddress));
+                   builder.AppendLine("State=" + NullHandler(info.State));
+                   builder.AppendLine("TotalTime=" + NullHandler(info.TotalTime));
+                   builder.AppendLine("UserTime=" + NullHandler(info.UserTime));
+                   builder.AppendLine("WaitReason=" + NullHandler(info.WaitReason));
+                   builder.AppendLine("WaitTime=" + NullHandler(info.WaitTime));                  
+                   builder.AppendLine("");
+
+               }
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillHandleDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               Dictionary<string, handleInfos> hnd = new Dictionary<string, handleInfos>();
+               Handle.EnumerateHandleByProcessId(Pid, true, ref hnd);
+
+               foreach (handleInfos info in hnd.Values)
+               {
+                   builder.AppendLine("[Handle]");
+                   builder.AppendLine("Attribute=" + NullHandler(info.Attributes));
+                   builder.AppendLine("CreateTime=" + NullHandler(info.CreateTime));
+                   builder.AppendLine("GrantedAccess=" + NullHandler(info.GrantedAccess));
+                   builder.AppendLine("Handle=" + NullHandler(info.Handle));
+                   builder.AppendLine("HandleCount=" + NullHandler(info.HandleCount));
+                   builder.AppendLine("Key=" + NullHandler(info.Key));
+                   builder.AppendLine("Name=" + NullHandler(info.Name));
+                   builder.AppendLine("NonPagedPoolUsage=" + NullHandler(info.NonPagedPoolUsage));
+                   builder.AppendLine("ObjectAddress=" + NullHandler(info.ObjectAddress));
+                   builder.AppendLine("ObjectCount=" + NullHandler(info.ObjectCount));
+                   builder.AppendLine("ObjectTypeNumber=" + NullHandler(info.ObjectTypeNumber));
+                   builder.AppendLine("PagedPollUsage=" + NullHandler(info.PagedPoolUsage));
+                   builder.AppendLine("PointerCount=" + NullHandler(info.PointerCount));
+                   builder.AppendLine("Type=" + NullHandler(info.Type));
+                   
+                   builder.AppendLine("");
+
+               }
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillHeapDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               Dictionary<string, heapInfos> hnd = Heap.EnumerateHeapsByProcessId(Pid);
+
+               foreach (heapInfos info in hnd.Values)
+               {
+                   builder.AppendLine("[Heap]");
+                   builder.AppendLine("BaseAddress=" + NullHandler(info.BaseAddress));
+                   builder.AppendLine("BlockCount=" + NullHandler(info.BlockCount));
+                   builder.AppendLine("Flags=" + NullHandler(info.Flags));
+                   builder.AppendLine("Granulraity=" + NullHandler(info.Granularity));
+                   builder.AppendLine("MemAllocated=" + NullHandler(info.MemAllocated));
+                   builder.AppendLine("MemCommited=" + NullHandler(info.MemCommitted));
+                   builder.AppendLine("tagCount=" + NullHandler(info.TagCount));
+                   builder.AppendLine("Tags=" + NullHandler(info.Tags));
+                   
+                   builder.AppendLine("");
+
+               }
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       }
+
+       byte[] FillTokenDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               Native.Api.NativeStructs.PrivilegeInfo[] tkn = Token.GetPrivilegesListByProcessId(Pid);
+
+               foreach (Native.Api.NativeStructs.PrivilegeInfo info in tkn)
+               {
+                   builder.AppendLine("[Privilages]");
+                   builder.AppendLine("Name=" + NullHandler(info.Name));
+                   builder.AppendLine("Privilage ID=" + NullHandler(info.pLuid));
+                   builder.AppendLine("Status=" + NullHandler(info.Status));
+                   
+                   builder.AppendLine("");
+
+               }
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       } 
+       
+     byte[] FillEnvDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+
+               processInfos pfs = new processInfos();
+               builder.AppendLine("Pending");
+               Console.WriteLine(builder.ToString());
+
+
+           }
+           catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               Console.WriteLine("Info Get:" + e.Message);
+
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+       } 
+
+
+       byte[] FillModuleDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+           try
+           {
+              
+              
+               Console.WriteLine("fOR pROCESS " + Pid) ;
+               
+               if(!ProcessExists(Pid) && IsWin64(Pid))
+                   return System.Text.Encoding.UTF8.GetBytes("Process Expired......");
+               System.Diagnostics.Process prs=System.Diagnostics.Process.GetProcessById(Pid);
+               System.Diagnostics.ProcessModuleCollection module= prs.Modules;
+              
+                
+               if ( module!=null)
+               {
+                   foreach(SD.ProcessModule mod in module){
+                    builder.AppendLine("[ " +NullHandler(mod.FileName)+ " ]");
+                    builder.AppendLine("BaseAddres="+NullHandler(mod.BaseAddress));
+                    builder.AppendLine("EntryPoint=" + NullHandler(mod.EntryPointAddress));
+                    builder.AppendLine("ModuleMemorySize=" + NullHandler(mod.ModuleMemorySize));                    
+                    builder.AppendLine("FileVersionInfo=" + NullHandler(mod.FileVersionInfo));
+                    builder.AppendLine("[FileInfo]");
+                    builder.AppendLine(NullHandler(mod.FileName));
                     builder.AppendLine("");
                       
                    }
                   
                }
 
-               Console.WriteLine("Get "+ module.Values.Count +builder.ToString());
+              Console.WriteLine("Get "+builder.ToString());
 
            }
            catch (Exception e)
            {
+               builder.AppendLine(e.Message);
                Console.WriteLine("Info Get:" + e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
 
        }
-       byte[] FillProcessDetail(int Pid)
+       
+        byte[] FillProcessDetail(int Pid)
        {
            StringBuilder builder=new StringBuilder();
            
@@ -156,12 +645,14 @@ namespace WinProcfs
           }
           catch(Exception e)
           {
-              Console.WriteLine("Info Get:"+e.Message);              
+              builder.AppendLine(e.Message);
+              Console.WriteLine("Info Get:"+e.Message); 
+             
           }
           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        }
 
-       byte[] FillMemorykDetail(int Pid)
+       byte[] FillMemoryDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
 
@@ -199,6 +690,7 @@ namespace WinProcfs
            }
            catch (Exception e)
            {
+               builder.AppendLine(e.Message);
                Console.WriteLine("Info Get:" + e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -244,6 +736,7 @@ namespace WinProcfs
            }
            catch (Exception e)
            {
+               builder.AppendLine(e.Message);
                Console.WriteLine("Info Get:" + e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -286,6 +779,7 @@ namespace WinProcfs
            }
            catch (Exception e)
            {
+               builder.AppendLine(e.Message);
                Console.WriteLine("Info Get:" + e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -329,7 +823,9 @@ namespace WinProcfs
             {
                 byte[] file=null;
                 VirtualNode Node = new VirtualNode(filename);
-                Console.WriteLine("{0},{1},{2}", Node.CurrentNodeDir, Node.CurrentNodeFile,Node.isFile); 
+                
+                
+                //Console.WriteLine("{0},{1},{2},{3}", filename,Node.CurrentNodeDir, Node.CurrentNodeFile,Node.isFile); 
                 if (Node.isFile)
                 {
                     Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
@@ -347,7 +843,7 @@ namespace WinProcfs
                                 file = FillProcessDetail(pid);
                                     break;
                                 case "Memory.inf":
-                                    file = FillMemorykDetail(pid);
+                                    file = FillMemoryDetail(pid);
                                     break;
                                 case "Network.inf":
                                     file = FillNetworkkDetail(pid);
@@ -355,21 +851,52 @@ namespace WinProcfs
                                 case "Module.inf":
                                     file = FillModuleDetail(pid);
                                     break;
+                                case "Thread.inf":
+                                    file = FillThreadDetail(pid);
+                                    break;
+                                case "Token.inf":
+                                    file = FillTokenDetail(pid);
+                                    break;
+                                case "Handle.inf":
+                                    file = FillHandleDetail(pid);
+                                    break;
+                                case "Window.inf":
+                                    file = FillWindowDetail(pid);
+                                    break;
+                                case "MemRegion.inf":
+                                    file = FillMemRegionDetail(pid);
+                                    break;
+                                case "IO Counters.inf":
+                                    file = FillIODetail(pid);
+                                    break;
+                                case "Heap.inf":
+                                    file = FillHeapDetail(pid);
+                                    break;                                    
                                 default:
+                                    file = FillEnvDetail(pid);
                                     break;
                             }
                         }
                         else
                         {
                             Console.WriteLine("ID " + pid);
-                            if(Node.CurrentNodeDir=="\\" || Node.CurrentNodeDir==""){
-                               
+                            if(Node.CurrentNodeDir=="\\" || Node.CurrentNodeDir==""){                           
                            switch (Node.CurrentNodeFile) 
                             {
                                 case "NetStat.inf":
                                 file = FillNetworkStatDetail();
                                 break;
-                                default:
+                                case "SystemInfo.inf":
+                                file = FillSysDetail();
+                                break;
+                                case "Jobs.inf":
+                                file = FillJobDetail();
+                                break;
+                               case "Services.inf":
+                                file = FillServiceDetail();
+                                break;                              
+                               default:
+                                file=FillEnvDetail(0);
                                 break;
                             }
                             }
