@@ -39,6 +39,8 @@ namespace WinProcfs
            processGrabberThread.Start();
        }
        
+
+
        public void UpdateProcessData()
        {
            while(true){
@@ -60,6 +62,48 @@ namespace WinProcfs
            return "";
 
            return str.ToString();
+
+       }
+       byte[] FillModuleDetail(int Pid)
+       {
+           StringBuilder builder = new StringBuilder();
+
+           try
+           {
+
+               Console.WriteLine("fOR pROCESS " + Pid) ;
+               Dictionary<string, moduleInfos> module=new Dictionary<string,moduleInfos>();
+               cProcess process = cProcess.GetProcessById(Pid);
+               if(process.IsWow64Process)
+               module = Module.EnumerateModulesWow64ByProcessId(Pid, false);
+               else
+                   module = Module.EnumerateModulesByProcessId(Pid, false);
+               if (module.Values.Count>=1)
+               {
+                   foreach(moduleInfos mod in module.Values){
+                    builder.AppendLine("[" +NullHandler(mod.Name)+ "]");
+                    builder.AppendLine("BaseAddres"+NullHandler(mod.BaseAddress));
+                    builder.AppendLine("EntryPoint" + NullHandler(mod.EntryPoint));
+                    builder.AppendLine("Flags" + NullHandler(mod.Flags));
+                    builder.AppendLine("LoadCount" + NullHandler(mod.LoadCount));
+                    builder.AppendLine("Manufacturer" + NullHandler(mod.Manufacturer));
+                    builder.AppendLine("Path" + NullHandler(mod.Path));
+                    builder.AppendLine("Version" + NullHandler(mod.Version));
+                    builder.AppendLine("Path" + NullHandler(mod.Path));
+                    builder.AppendLine("");
+                      
+                   }
+                  
+               }
+
+               Console.WriteLine("Get "+ module.Values.Count +builder.ToString());
+
+           }
+           catch (Exception e)
+           {
+               Console.WriteLine("Info Get:" + e.Message);
+           }
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
 
        }
        byte[] FillProcessDetail(int Pid)
@@ -307,6 +351,9 @@ namespace WinProcfs
                                     break;
                                 case "Network.inf":
                                     file = FillNetworkkDetail(pid);
+                                    break;
+                                case "Module.inf":
+                                    file = FillModuleDetail(pid);
                                     break;
                                 default:
                                     break;
