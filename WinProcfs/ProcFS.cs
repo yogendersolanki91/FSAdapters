@@ -11,41 +11,69 @@ using System.Management;
 using System.Runtime.InteropServices;
 using SD=System.Diagnostics;
 using System.Globalization;
+using NLog;
 
 
 namespace WinProcfs
 {
     class Program
     {
+        static DokanNative native;
+        
         static void Main(string[] args)
         {
-            DokanNative native = new DokanNative(new WinProcFS(),0,"P:","ProcFS","WinProc");
+           WinProcFS fs; fs = new WinProcFS();
+            handler=new ConsoleEventDelegate(ConsoleEventCallback);
+            SetConsoleCtrlHandler(handler, true);
+            native = new DokanNative(fs,0,"S:","Proc","Proc");
             native.StartDokan();
         }
+        static bool ConsoleEventCallback(int eventType)
+        {
+            if (eventType == 2)
+            {
+                native.StopDokan();
+            }
+            return false;
+        }
+        static ConsoleEventDelegate handler;   // Keeps it from getting garbage collected
+        // Pinvoke
+        private delegate bool ConsoleEventDelegate(int eventType);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetConsoleCtrlHandler(ConsoleEventDelegate callback, bool add);
     }
 
     class WinProcFS : FileSystemCoreFunctions
     {
-        string[] baseinfos = { "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IO Counters.inf", "Window.inf", "Thread.inf", "Handle.inf", "Heap.inf", "Token.inf", "EnvVariable.inf" };
+        string[] baseinfos = { "Process.inf", "Network.inf", "Module.inf", "MemRegion.inf", "IOCounters.inf", "Window.inf", "Thread.inf", "Handle.inf", "Heap.inf", "Token.inf", "EnvVariable.inf" };
+        string[] remoteBase = { "Module.inf", "Process.inf", "Thread.inf", "IOCounters.inf" };
+        string[] remoteCommon = { "Services.inf" ,"System.inf"};
         string[] commonSystem={ "Services.inf", "SystemInfo.inf", "Jobs.inf", "EnvVariable.inf","NetStat.inf"};
         ST.Thread processGrabberThread;
         ST.Thread serviceThread;
+        ST.Thread wmiThread;
+    
         ManagementObjectSearcher processSearcher;
         Dictionary<string, processInfos> database;
        object critical;
        object criticalS;
-
+       Logger log;
        public WinProcFS(){
            database=new Dictionary<string,processInfos>();
            critical=new object();
            criticalS = new object();
+           log = LogManager.GetCurrentClassLogger();
            processGrabberThread = new ST.Thread(new ST.ThreadStart(this.UpdateProcessData)) ;
-           serviceThread = new ST.Thread(new ST.ThreadStart(UpdateServiceData));
+           
+
+           serviceThread = new ST.Thread(new ST.ThreadStart(this.UpdateServiceData));
            processGrabberThread.Name = "DataProcessor";
            serviceThread.Start();
            processSearcher = new ManagementObjectSearcher("Select * from Win32_Process");
            processGrabberThread.Start();
        }
+       Dictionary<string, byte[]> AuthByte = new Dictionary<string, byte[]>();
+
 
        public void UpdateServiceData()
        {
@@ -57,7 +85,8 @@ namespace WinProcfs
                    serviceCatch = FillServiceDetail();
                    if (err != "")
                    {
-                       Console.WriteLine("Grabber Error :" + err);
+                       if(Self.isDebug())
+                       log.Error("Grabber Error :" , err);
                    }
                }
                ST.Thread.Sleep(10000);
@@ -73,12 +102,14 @@ namespace WinProcfs
                database = Native.Objects.Process.EnumerateHiddenProcessesHandleMethod();
                if (err != "")
                {
-                   Console.WriteLine("Grabber Error :"+err);
+                   if (Self.isDebug())
+                   log.Error("Grabber Error :",err);
                }
            }
            ST.Thread.Sleep(3000);
            }
        }
+
        string NullHandler(object str)
        {
            if(str==null)
@@ -88,7 +119,8 @@ namespace WinProcfs
 
        }
 
-           private static bool IsWin64(int pid)
+       #region  All Local Stuff
+       private static bool IsWin64(int pid)
         {
                try{
             System.Diagnostics.Process process=  System.Diagnostics.Process.GetProcessById(pid);
@@ -124,7 +156,7 @@ namespace WinProcfs
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool IsWow64Process([In] IntPtr process, [Out] out bool wow64Process);
     }
-
+    
        private bool ProcessExists(int id)
         {
             return SD.Process.GetProcesses().Any(x => x.Id == id);
@@ -171,7 +203,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+               log.Fatal("Exception: {0}" , e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -204,7 +237,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+               log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -262,7 +296,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+               log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -274,7 +309,7 @@ namespace WinProcfs
 
            try
            {
-
+               log.Info("MemRegion Detail Filling");
 
                processInfos pfs = new processInfos();
                if (database.TryGetValue(Pid.ToString(), out pfs))
@@ -303,7 +338,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -316,7 +352,7 @@ namespace WinProcfs
            try
            {
 
-
+               log.Info("IO Detail Filling");
                processInfos pfs = new processInfos();
                
                if (database.TryGetValue(Pid.ToString(), out pfs))
@@ -343,7 +379,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -352,7 +389,7 @@ namespace WinProcfs
        byte[] FillWindowDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
-
+           log.Info("Window Detail Filling");
            try
            {
 
@@ -384,7 +421,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -396,7 +434,7 @@ namespace WinProcfs
            try
            {
 
-
+               log.Info("Thread Detail Filling");
                processInfos pfs = new processInfos();
                Dictionary<string, threadInfos> thr = new Dictionary<string, threadInfos>();
                Thread.EnumerateThreadsByProcessId(ref thr, Pid);
@@ -423,7 +461,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -436,7 +475,7 @@ namespace WinProcfs
            try
            {
 
-
+               log.Info("Handle Detail Filling");
                processInfos pfs = new processInfos();
                Dictionary<string, handleInfos> hnd = new Dictionary<string, handleInfos>();
                Handle.EnumerateHandleByProcessId(Pid, true, ref hnd);
@@ -469,7 +508,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -478,7 +518,8 @@ namespace WinProcfs
        byte[] FillHeapDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
-
+           if(System.Diagnostics.Debugger.IsAttached)
+           log.Info("Heap Detail Filling");
            try
            {
 
@@ -508,7 +549,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -517,7 +559,8 @@ namespace WinProcfs
        byte[] FillTokenDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
-
+           if (System.Diagnostics.Debugger.IsAttached)
+           log.Info("Token Detail Filling");
            try
            {
 
@@ -542,16 +585,18 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception:{0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
        
-     byte[] FillEnvDetail(int Pid)
+       byte[] FillEnvDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
-
+           if (System.Diagnostics.Debugger.IsAttached)
+           log.Info("Env Detail Filling");
            try
            {
 
@@ -565,21 +610,21 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
 
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
 
-
        byte[] FillModuleDetail(int Pid)
        {
+           if (System.Diagnostics.Debugger.IsAttached)
+           log.Info("Module Detail Filling");
            StringBuilder builder = new StringBuilder();
            try
            {
               
-              
-               Console.WriteLine("fOR pROCESS " + Pid) ;
                
                if(!ProcessExists(Pid) && IsWin64(Pid))
                    return System.Text.Encoding.UTF8.GetBytes("Process Expired......");
@@ -603,13 +648,14 @@ namespace WinProcfs
                   
                }
 
-              Console.WriteLine("Get "+builder.ToString());
+           
 
            }
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
 
@@ -621,8 +667,9 @@ namespace WinProcfs
            
           try
           {
-          
-
+              if (System.Diagnostics.Debugger.IsAttached)
+                  if (System.Diagnostics.Debugger.IsAttached)
+              log.Info("Procees Detail Filling");
               processInfos pfs = new processInfos();
               if (database.TryGetValue(Pid.ToString(), out pfs))
               {
@@ -666,7 +713,8 @@ namespace WinProcfs
           catch(Exception e)
           {
               builder.AppendLine(e.Message);
-              Console.WriteLine("Info Get:"+e.Message); 
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Fatal("Exception: {0}", e.Message); 
              
           }
           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
@@ -678,7 +726,8 @@ namespace WinProcfs
 
            try
            {
-              
+               if (System.Diagnostics.Debugger.IsAttached)
+               log.Info("Memory Detail Filling");
                processInfos pfs = new processInfos();
                if (database.TryGetValue(Pid.ToString(), out pfs))
                {
@@ -711,7 +760,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        }
@@ -719,7 +769,8 @@ namespace WinProcfs
        byte[] FillNetworkStatDetail()
        {
            StringBuilder builder = new StringBuilder();
-
+           if (System.Diagnostics.Debugger.IsAttached)
+           log.Info("NetworkStat Detail Filling");
            try
            {               
                Native.Api.NativeStructs.MibTcpStats tcpState= Native.Objects.Network.GetTcpStatistics();
@@ -757,7 +808,8 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception: {0}", e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
        } 
@@ -765,7 +817,8 @@ namespace WinProcfs
        byte[] FillNetworkkDetail(int Pid)
        {
            StringBuilder builder = new StringBuilder();
-
+           if (System.Diagnostics.Debugger.IsAttached)
+           log.Info("Network Detail Filling");
            try
            {
               Dictionary<string,networkInfos> SocketInfo=new Dictionary<string,networkInfos>();
@@ -800,12 +853,354 @@ namespace WinProcfs
            catch (Exception e)
            {
                builder.AppendLine(e.Message);
-               Console.WriteLine("Info Get:" + e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+                   log.Fatal("Exception:{0}", e.Message);
            }
            return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
-       } 
- 
-        public uint Def_Cleanup(string filename, IntPtr info)
+       }
+       #endregion
+
+      #region All Remote WMI
+      public List<string> WmiProcessCollection(VirtualNode node ,out string s) {
+          List<string> strList = new List<string>();
+          Dictionary<String, processInfos> details = new Dictionary<string, processInfos>();
+          ConnectionOptions con = new ConnectionOptions();
+          byte[] authentication=new byte[12];
+           string[] str;
+          if( AuthByte.TryGetValue(node.RootNode,out authentication)){
+              if (System.Diagnostics.Debugger.IsAttached)
+              log.Info("Authentication -"+System.Text.Encoding.ASCII.GetString(authentication));
+              str=System.Text.Encoding.ASCII.GetString(authentication).Split(':');
+          }else{
+              s = "Access Denied";
+              return strList;
+          }
+          
+          
+          if (str!=null && str.Length != 2) {
+              s = "Access Denied";
+              return strList;
+          }
+          con.Username =node.RootNode+@"\"+str[0];
+          con.Password = str[1];
+          con.Authentication = AuthenticationLevel.Packet;
+          con.Impersonation = ImpersonationLevel.Impersonate;
+          ManagementScope scope = new ManagementScope("\\\\"+node.RootNode+"\\root\\cimv2", con);
+          ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Process");
+          s = "";
+          Wmi.Objects.Process.EnumerateProcesses(new ManagementObjectSearcher(scope, query), ref details, ref s);
+         
+          foreach (processInfos info in details.Values)
+          {
+              
+              strList.Add(info.ProcessId.ToString());
+          }
+          if (System.Diagnostics.Debugger.IsAttached)
+          log.Info("Total Process Found-"+details.Count+" IF Error"+s);
+          return strList;
+          
+      
+      }
+      public byte[] WmiProcessFill(VirtualNode node ,out string s){
+             StringBuilder builder=new StringBuilder();
+            s="";           
+         try
+         {
+          Dictionary<String, processInfos> details = new Dictionary<string, processInfos>();
+          ConnectionOptions con = new ConnectionOptions();
+          byte[] authentication=new byte[12];
+          string[] str={"",""};
+          if( AuthByte.TryGetValue(node.RootNode,out authentication)){
+              if (System.Diagnostics.Debugger.IsAttached)
+              log.Info("Authentication -"+System.Text.Encoding.ASCII.GetString(authentication));
+              str=System.Text.Encoding.ASCII.GetString(authentication).Split(':');
+          }else{
+              s = "Access Denied";
+              
+          }
+          
+          
+          if (str!=null && str.Length != 2) {
+              s = "Access Denied";
+              
+          }
+          con.Username =node.RootNode+@"\"+str[0];
+          con.Password = str[1];
+          con.Authentication = AuthenticationLevel.Packet;
+          con.Impersonation = ImpersonationLevel.Impersonate;
+          ManagementScope scope = new ManagementScope("\\\\"+node.RootNode+"\\root\\cimv2", con);
+          ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Process");
+          s = "";
+          Wmi.Objects.Process.EnumerateProcesses(new ManagementObjectSearcher(scope, query), ref details, ref s);
+       
+          processInfos pfs=new processInfos();
+          if(details.TryGetValue(node.CurrentNodeDir,out pfs)){              
+                  builder.AppendLine("[Process Property]");
+                  builder.AppendLine("AffinityMask:" + NullHandler(pfs.AffinityMask));
+                  builder.AppendLine("Name:" + NullHandler(pfs.Name));
+                  builder.AppendLine("Path:" + NullHandler(pfs.Path));
+                  builder.AppendLine("Priority:" + NullHandler(pfs.Priority));
+                  builder.AppendLine("ProcessId:" + NullHandler(pfs.ProcessId));
+                  builder.AppendLine("ParentProcessId:" + NullHandler(pfs.ParentProcessId));
+                  builder.AppendLine("UserName:" + NullHandler(pfs.UserName));
+                  builder.AppendLine("CommandLineArguments:" + NullHandler(pfs.CommandLine));
+                  builder.AppendLine("DomainName" + NullHandler(pfs.DomainName));
+
+                  builder.AppendLine("");
+                  builder.AppendLine("[Perfomance and Resouces]");
+                  builder.AppendLine("AverageCpuUsage:" + NullHandler(pfs.AverageCpuUsage * 100));
+                  builder.AppendLine("ProcessorTime:" + NullHandler(pfs.ProcessorTime));
+                  builder.AppendLine("UserModeTime" + NullHandler(pfs.UserTime));
+                  builder.AppendLine("KernelTime:" + NullHandler(pfs.KernelTime));
+                  builder.AppendLine("StartTime:" + NullHandler(pfs.StartTime));
+
+                  builder.AppendLine("");
+                  builder.AppendLine("\n[System Resources Count]");
+                  builder.AppendLine("ThreadCount:" + NullHandler(pfs.ThreadCount));
+                  builder.AppendLine("UserObjectsCount:" + NullHandler(pfs.UserObjects));
+                  builder.AppendLine("GdiObjects:" + NullHandler(pfs.GdiObjects));
+                  builder.AppendLine("HandleCounts:" + NullHandler(pfs.HandleCount));
+                  
+                  builder.AppendLine("");
+                  builder.AppendLine("[ProcessMisc]");
+                  builder.AppendLine("HasReanalize:" + NullHandler(pfs.HasReanalize));
+                  builder.AppendLine("IsHidden:" + NullHandler(pfs.IsHidden));
+                
+          }else{
+              builder.AppendLine(s);
+          }
+          if (System.Diagnostics.Debugger.IsAttached)
+          log.Info("Total Process Found-"+details.Count+" IF Error"+s);
+      }
+          catch (Exception e)
+           {
+               builder.AppendLine(e.Message);
+               if (System.Diagnostics.Debugger.IsAttached)
+               log.Fatal("Exception: {0}" , e.Message);
+
+           }
+          
+           return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+      }
+
+      public byte[] WmiModuleFill(VirtualNode node, out string s)
+      {
+          StringBuilder builder = new StringBuilder();
+          s = "";
+          try
+          {
+              Dictionary<String, moduleInfos> details = new Dictionary<string, moduleInfos>();
+              ConnectionOptions con = new ConnectionOptions();
+              byte[] authentication = new byte[12];
+              string[] str = { };
+              if (AuthByte.TryGetValue(node.RootNode, out authentication))
+              {
+                  if (System.Diagnostics.Debugger.IsAttached)
+                      log.Info("Authentication -" + System.Text.Encoding.ASCII.GetString(authentication));
+                  str = System.Text.Encoding.ASCII.GetString(authentication).Split(':');
+              }
+              else
+              {
+                  s = "Access Denied";
+
+              }
+
+
+              if (str != null && str.Length != 2)
+              {
+                  s = "Access Denied";
+
+              }
+              con.Username = node.RootNode + @"\" + str[0];
+              con.Password = str[1];
+              con.Authentication = AuthenticationLevel.Packet;
+              con.Impersonation = ImpersonationLevel.Impersonate;
+              ManagementScope scope = new ManagementScope("\\\\" + node.RootNode + "\\root\\cimv2", con);
+              ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Process");
+              s = "";
+              Wmi.Objects.Module.EnumerateModuleById(int.Parse(node.CurrentNodeDir),new ManagementObjectSearcher(scope, query), ref details, ref s);
+              
+              processInfos pfs = new processInfos();
+              if (details.Values.Count>0)
+              {
+                  foreach (moduleInfos mod in details.Values)
+                  {
+                      builder.AppendLine("[ " + NullHandler(mod.Name) + " ]");
+                      builder.AppendLine("BaseAddres:" + NullHandler(mod.BaseAddress));
+                      builder.AppendLine("EntryPoint:" + NullHandler(mod.EntryPoint));
+                      builder.AppendLine("ModuleMemorySize:" + NullHandler(mod.Size));
+                      builder.AppendLine("FileVersionInfo:" + NullHandler(mod.Version));
+                      builder.AppendLine("LoadCount:" + NullHandler(mod.LoadCount));
+                      builder.AppendLine("[FileInfo]");
+                      builder.AppendLine(NullHandler(mod.FileInfo));
+                      builder.AppendLine("");
+
+                  }
+
+              }
+              else
+              {
+                  builder.AppendLine(s);
+              }
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Info("Total Module Found-" + details.Count + " IF Error" + s);
+          }
+          catch (Exception e)
+          {
+              builder.AppendLine(e.Message);
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Fatal("Exception: {0}", e.Message);
+
+          }
+
+          return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+      }
+
+      public byte[] WmiThreadFill(VirtualNode node, out string s)
+      {
+          StringBuilder builder = new StringBuilder();
+          s = "";
+          try
+          {
+              Dictionary<String, threadInfos> details = new Dictionary<string, threadInfos>();
+              ConnectionOptions con = new ConnectionOptions();
+              byte[] authentication = new byte[12];
+              string[] str = { };
+              if (AuthByte.TryGetValue(node.RootNode, out authentication))
+              {
+                  if (System.Diagnostics.Debugger.IsAttached)
+                      log.Info("Authentication -" + System.Text.Encoding.ASCII.GetString(authentication));
+                  str = System.Text.Encoding.ASCII.GetString(authentication).Split(':');
+              }
+              else
+              {
+                  s = "Access Denied";
+
+              }
+
+
+              if (str != null && str.Length != 2)
+              {
+                  s = "Access Denied";
+
+              }
+              con.Username = node.RootNode + @"\" + str[0];
+              con.Password = str[1];
+              con.Authentication = AuthenticationLevel.Packet;
+              con.Impersonation = ImpersonationLevel.Impersonate;
+              ManagementScope scope = new ManagementScope("\\\\" + node.RootNode + "\\root\\cimv2", con);
+              ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Thread");
+              s = "";
+              Wmi.Objects.Thread.EnumerateThreadByIds(int.Parse(node.CurrentNodeDir), new ManagementObjectSearcher(scope, query), ref details, ref s);
+
+              processInfos pfs = new processInfos();
+              if (details.Values.Count > 0)
+              {
+                  foreach (threadInfos info in details.Values)
+                  {
+                      builder.AppendLine("[Thread " + info.Id + " ]");
+                      builder.AppendLine("KernelTime:" + NullHandler(info.KernelTime));
+                      builder.AppendLine("Priority:" + NullHandler(info.Priority));
+                      builder.AppendLine("ProcessID:" + NullHandler(info.ProcessId));
+                      builder.AppendLine("StartAddress:" + NullHandler(info.StartAddress));
+                      builder.AppendLine("State:" + NullHandler(info.State));
+                      builder.AppendLine("TotalTime:" + NullHandler(info.TotalTime));
+                      builder.AppendLine("UserTime:" + NullHandler(info.UserTime));
+                      builder.AppendLine("WaitReason:" + NullHandler(info.WaitReason));
+                      builder.AppendLine("WaitTime:" + NullHandler(info.WaitTime));
+                      builder.AppendLine("");
+                  }
+
+              }
+              else
+              {
+                  builder.AppendLine(s);
+              }
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Info("Total Thread Found-" + details.Count + " IF Error" + s);
+          }
+          catch (Exception e)
+          {
+              builder.AppendLine(e.Message);
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Fatal("Exception: {0}", e.Message);
+
+          }
+
+          return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+      }
+
+      public byte[] WmiIOFill(VirtualNode node, out string s)
+      {
+          StringBuilder builder = new StringBuilder();
+          s = "";
+          try
+          {
+              Dictionary<String, processInfos> details = new Dictionary<string, processInfos>();
+              ConnectionOptions con = new ConnectionOptions();
+              byte[] authentication = new byte[12];
+              string[] str = { };
+              if (AuthByte.TryGetValue(node.RootNode, out authentication))
+              {
+                  if (System.Diagnostics.Debugger.IsAttached)
+                      log.Info("Authentication -" + System.Text.Encoding.ASCII.GetString(authentication));
+                  str = System.Text.Encoding.ASCII.GetString(authentication).Split(':');
+              }
+              else
+              {
+                  s = "Access Denied";
+
+              }
+
+
+              if (str != null && str.Length != 2)
+              {
+                  s = "Access Denied";
+
+              }
+              con.Username = node.RootNode + @"\" + str[0];
+              con.Password = str[1];
+              con.Authentication = AuthenticationLevel.Packet;
+              con.Impersonation = ImpersonationLevel.Impersonate;
+              ManagementScope scope = new ManagementScope("\\\\" + node.RootNode + "\\root\\cimv2", con);
+              ObjectQuery query = new ObjectQuery("SELECT * FROM Win32_Process");
+              s = "";
+              Wmi.Objects.Process.EnumerateProcesses(new ManagementObjectSearcher(scope, query), ref details, ref s);
+
+              processInfos pfs = new processInfos();
+              if (details.TryGetValue(node.CurrentNodeDir,out pfs))
+              {
+                  builder.AppendLine("[IOCounter]");
+                  builder.AppendLine("WriteOperationCount:" + NullHandler(pfs.IOValues.WriteOperationCount));
+                  builder.AppendLine("WriteTransferCount:" + NullHandler(pfs.IOValues.WriteTransferCount));
+                  builder.AppendLine("ReadOperationCount:" + NullHandler(pfs.IOValues.ReadOperationCount));
+                  builder.AppendLine("ReadTransferCount:" + NullHandler(pfs.IOValues.ReadTransferCount));
+                  builder.AppendLine("OtherOperationCount:" + NullHandler(pfs.IOValues.OtherOperationCount));
+                  builder.AppendLine("OtherTransferCount:" + NullHandler(pfs.IOValues.OtherTransferCount));
+                  builder.AppendLine("");
+
+              }
+              else
+              {
+                  builder.AppendLine(s);
+              }
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Info("Total IO Found-" + details.Count + " IF Error" + s);
+          }
+          catch (Exception e)
+          {
+              builder.AppendLine(e.Message);
+              if (System.Diagnostics.Debugger.IsAttached)
+                  log.Fatal("Exception: {0}", e.Message);
+
+          }
+
+          return System.Text.Encoding.UTF8.GetBytes(builder.ToString());
+      } 
+      #endregion
+
+
+       public uint Def_Cleanup(string filename, IntPtr info)
         {
             return 0;
         }
@@ -816,16 +1211,27 @@ namespace WinProcfs
         }
         public uint Def_CreateDirectory(string filename, IntPtr info)
         {
+            VirtualNode node=new VirtualNode(filename);
             
+            if (node.isRemote && !node.isFile)
+            {                               
+                AuthByte.Add(node.RootNode, null);
+                return NtStatus.Success;
+            }
+            else {
+               
+            
+            }
+                        
             return NtStatus.MediaWriteProtected;
         }
 
         public uint Def_CreateFile(string filename, System.IO.FileAccess access, System.IO.FileShare share, System.IO.FileMode mode, System.IO.FileOptions options, IntPtr info)
         {
             VirtualNode node = new VirtualNode(filename);
-            if (node.isFile)
+            if (node.isRemote)
             {
-                if (!node.CurrentNodeFile.EndsWith("inf",StringComparison.CurrentCultureIgnoreCase))
+                if (node.CurrentNodeFile.EndsWith("auth.inf",StringComparison.CurrentCultureIgnoreCase))
                 {
                     return 0;
                 }
@@ -843,21 +1249,45 @@ namespace WinProcfs
             {
                 byte[] file=null;
                 VirtualNode Node = new VirtualNode(filename);
-                
-                
+
+                if (Node.isFile && Node.isRemote) {
+                    if (System.Diagnostics.Debugger.IsAttached)
+                    log.Info("Reading Remote Data Node-{0} Data-{1}",Node.RootNode,Node.CurrentNodeFile);
+                    
+                    string s="";
+                    switch (Node.CurrentNodeFile)
+                    {
+                        case "Process.inf":
+                            file = WmiProcessFill(Node, out s);
+                            break;
+                        case "Module.inf":
+                            file = WmiModuleFill(Node, out s);
+                            break;
+                        case "IOCounters.inf":
+                            file = WmiIOFill(Node, out s);
+                            break;
+                        case "Thread.inf":
+                            file = WmiThreadFill(Node,out s);
+                            break;
+                        default:
+                            return NtStatus.FileInvalid;                            
+                    }            
+                  
+                }
                 //Console.WriteLine("{0},{1},{2},{3}", filename,Node.CurrentNodeDir, Node.CurrentNodeFile,Node.isFile); 
-                if (Node.isFile)
+                else if (Node.isFile)
                 {
-                    Console.WriteLine("{0} {1}", Node.CurrentNodeDir, Node.CurrentNodeFile);
+                    if (System.Diagnostics.Debugger.IsAttached)
+                    log.Info("Reading Local Data Node-{0} Data-{1}", Node.RootNode, Node.CurrentNodeFile);
                     if (Node.CurrentNodeFile.EndsWith(".inf"))
                     {
                        
                         int pid;
-                        Console.WriteLine("OK ....");
+                        
                         if (int.TryParse(Node.CurrentNodeDir, out pid))
                         {
 
-                            Console.WriteLine("ID case "+pid);
+                           
                             switch (Node.CurrentNodeFile) { 
                                 case "Process.inf":
                                 file = FillProcessDetail(pid);
@@ -886,7 +1316,7 @@ namespace WinProcfs
                                 case "MemRegion.inf":
                                     file = FillMemRegionDetail(pid);
                                     break;
-                                case "IO Counters.inf":
+                                case "IOCounters.inf":
                                     file = FillIODetail(pid);
                                     break;
                                 case "Heap.inf":
@@ -899,7 +1329,7 @@ namespace WinProcfs
                         }
                         else
                         {
-                            Console.WriteLine("ID " + pid);
+                          
                             if(Node.CurrentNodeDir=="\\" || Node.CurrentNodeDir==""){                           
                            switch (Node.CurrentNodeFile) 
                             {
@@ -928,32 +1358,38 @@ namespace WinProcfs
 
 
                         }
-                        if (file != null && file.Length != 0 && Offset < file.Length)
-                        {
-                            if (BufferSize > file.Length - Offset)
-                            {
-                                NumberByteReadSuccess = (uint)(file.Length - Offset);
-                                System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)NumberByteReadSuccess);
-                            }
-                            else
-                            {
-                                NumberByteReadSuccess = BufferSize;
-                                System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)BufferSize);
-                            }
-                        }
-                        else {
-                            NumberByteReadSuccess = 0;
-                        }
+                      
 
                         
                     }
 
                 }
-                return 0;
+                if (file != null && file.Length != 0 && Offset < file.Length)
+                {
+                    if (BufferSize > file.Length - Offset)
+                    {
+                        NumberByteReadSuccess = (uint)(file.Length - Offset);
+                        System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)NumberByteReadSuccess);
+                    }
+                    else
+                    {
+                        NumberByteReadSuccess = BufferSize;
+                        System.Runtime.InteropServices.Marshal.Copy(file, (int)Offset, buffer, (int)BufferSize);
+                    }
+                    return 0;
+                }
+                else
+                {
+                    NumberByteReadSuccess = 0;
+                    return 0;
+                }
+               
             }
             catch(Exception e)
             {
-                Console.WriteLine("Read -"+e.Message+" Line "+new System.Diagnostics.StackTrace(e,true).GetFrame(0).GetFileLineNumber());
+                
+                    if (System.Diagnostics.Debugger.IsAttached)
+                    log.Error("Read Error "+e.Message);                    
                 return NtStatus.FileInvalid;
             }
         }
@@ -1006,8 +1442,61 @@ namespace WinProcfs
             try
             {
                 VirtualNode Node = new VirtualNode(filename);
-                if ((Node.RootNode == "\\" || Node.RootNode == "") && !Node.isFile && Node.CurrentNodeDir=="")
+                if (Node.isRemote)
                 {
+                    string s="";
+                    if (System.Diagnostics.Debugger.IsAttached)
+                    log.Info("Remote Node Accessed {0}",Node.RootNode);
+                    if (s.Contains("Access"))
+                        return NtStatus.AccessDenied;
+                    int i = 0;
+                    if (!int.TryParse(Node.CurrentNodeDir, out i))
+                    foreach (string prcs in WmiProcessCollection(Node,out s))
+                    {
+                        WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
+                        Information.cFileName = prcs;
+                        Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;
+                        FillFunction(ref Information, info);
+                    }
+                  
+                    if (int.TryParse(Node.CurrentNodeDir, out i))
+                    {
+                        foreach (string file in remoteBase) {
+                            WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
+                            Information.cFileName = file;
+                            Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.dwFileAttributes = FileAttributes.Readonly;
+                            Information.nFileSizeLow = 100000;
+                            FillFunction(ref Information, info);
+                        }
+                    }
+                    else
+                    {
+                        foreach (string file in remoteCommon)
+                        {
+                            WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
+                            Information.cFileName = file;
+                            Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                            Information.dwFileAttributes = FileAttributes.Readonly;
+                            Information.nFileSizeLow = 100000;
+                            FillFunction(ref Information, info);
+                        }
+                    }
+                    return 0;
+
+                }
+                
+                else if ((Node.RootNode == "\\" || Node.RootNode == "") && !Node.isFile && Node.CurrentNodeDir=="")
+                {
+                    if (System.Diagnostics.Debugger.IsAttached)
+                        log.Info("Local Node Accessed {0}", Node.RootNode);
                     lock (critical)
                     {
                         foreach (string prcs in database.Keys)
@@ -1031,6 +1520,17 @@ namespace WinProcfs
                         Information.dwFileAttributes = FileAttributes.Readonly;
                         Information.nFileSizeLow = 100000;
                         FillFunction(ref Information, info);
+                    }
+                    foreach (string remote in AuthByte.Keys)
+                    {
+                        WIN32_FIND_DATA Information = new WIN32_FIND_DATA();
+                        Information.cFileName = remote;
+                        Information.ftCreationTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.ftLastAccessTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.ftLastWriteTime = HelperFunction.DateTimeToFileTime(DateTime.Now.ToFileTime());
+                        Information.dwFileAttributes = FileAttributes.Directory | FileAttributes.Readonly;
+                        FillFunction(ref Information, info);
+
                     }
 
                 }
@@ -1070,7 +1570,8 @@ namespace WinProcfs
             }
             catch (Exception e)
             {
-                Console.WriteLine("Find Error :"+ e.Message+"  Line:"+new System.Diagnostics.StackTrace(e,true).GetFrame(0).GetFileLineNumber());
+                if (System.Diagnostics.Debugger.IsAttached)
+                    log.Error("Find Error :" + e.Message);
                 return NtStatus.FileInvalid;
             }
         }
@@ -1130,6 +1631,22 @@ namespace WinProcfs
 
         public uint Def_WriteFile(string filename, byte[] buffer, ref uint writtenBytes, long offset, IntPtr info)
         {
+            VirtualNode node = new VirtualNode(filename);
+            if (node.isRemote && node.CurrentNodeFile == "auth.inf")
+            {
+
+                if (AuthByte.ContainsKey(node.RootNode))
+                {
+                    AuthByte[node.RootNode] = buffer;
+                }
+                else if(!AuthByte.ContainsKey(node.RootNode)){
+                    AuthByte.Add(node.RootNode, buffer);
+                }
+                writtenBytes = (uint)buffer.Length;
+                return 0;
+            }
+
+
             return NtStatus.MediaWriteProtected;
         }
     }

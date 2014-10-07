@@ -7,6 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace Utility
 {
@@ -99,14 +101,71 @@ namespace Utility
         public string CurrentNodeFile;
         public string RootNode;
         public bool isFile;
+        public bool isRemote;
+
         public VirtualNode(string Path)
         {
             AllNodes = Path.Split('\\').Where(x => !string.IsNullOrEmpty(x)).ToArray();
-
             NodePath = Path;
             if (!Path.EndsWith("Desktop.inf", StringComparison.InvariantCultureIgnoreCase) && !Path.EndsWith("Autorun.inf", StringComparison.InvariantCultureIgnoreCase))
             {
-                if (AllNodes.Length >= 2 && !Path.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
+                //System.Net.IPAddress ip = System.Net.IPAddress.Any;
+                Regex ip = new Regex(@"^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$");
+                if (AllNodes.Length>=1 && ip.IsMatch(AllNodes[0]))
+                {
+                   
+                    //remote node 
+                    RootNode = AllNodes[0];
+                    isRemote = true;
+                    if(AllNodes[AllNodes.Length-1].EndsWith(".inf")){
+                        if (AllNodes.Length <= 2)
+                        {
+                            RootNode = AllNodes[AllNodes.Length - 2];
+                            CurrentNodeDir = AllNodes[AllNodes.Length - 2];
+                            CurrentNodeFile = AllNodes[AllNodes.Length - 1];
+                            isFile = true;
+                        }
+                        else if (AllNodes.Length > 2)
+                        {
+                            RootNode = AllNodes[AllNodes.Length - 3];
+                            CurrentNodeDir = AllNodes[AllNodes.Length - 2];
+                            CurrentNodeFile = AllNodes[AllNodes.Length - 1];
+                            isFile = true;
+                        }
+        
+                        
+                    }
+                    else
+                    {
+                        if (AllNodes.Length < 2)
+                        {
+                            RootNode = AllNodes[0];
+                            CurrentNodeDir = AllNodes[0];
+                            CurrentNodeFile = "";
+                            isFile = false;
+
+                        }
+
+                        else if (AllNodes.Length == 2)
+                        {
+                            RootNode = AllNodes[0];
+                            CurrentNodeDir = AllNodes[1];
+                            CurrentNodeFile = "";
+                            isFile = false;
+                        }
+                        else
+                        {
+                            RootNode = AllNodes[AllNodes.Length - 1];
+                            CurrentNodeDir = AllNodes[AllNodes.Length - 1];
+                            CurrentNodeFile = "";
+                            isFile = false;
+                        }
+                    }
+                    
+
+                }
+
+                else if (AllNodes.Length >= 2 && !Path.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
                 {
                     //for (int i = 1; i < AllNodes.Length - 2;i++ )
                     CurrentNodeDir = AllNodes[AllNodes.Length - 1].Trim();
@@ -115,7 +174,7 @@ namespace Utility
                     RootNode = AllNodes[0];
 
                 }
-
+                
                 else if (AllNodes.Length >= 2 && NodePath.EndsWith(".inf", StringComparison.InvariantCultureIgnoreCase))
                 {
                     CurrentNodeDir = AllNodes[AllNodes.Length - 2].Trim();
@@ -174,6 +233,19 @@ namespace Utility
 
 
     }
+    public class Self
+    {
+        [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
+        static extern bool CheckRemoteDebuggerPresent(IntPtr hProcess, ref bool isDebuggerPresent);
+
+         public static bool isDebug(){
+           bool res=false;
+            CheckRemoteDebuggerPresent(System.Diagnostics.Process.GetCurrentProcess().Handle,ref res);
+            return res;
+        }
+
+    }
+    
     /// <summary>
     /// A NT status value.
     /// </summary>
